@@ -2,6 +2,7 @@ from openai import OpenAI
 from pymongo import MongoClient
 from multiplicative_weights import MultWeights
 import textfile
+from bson.objectid import ObjectId
 
 class Bargainer:
     def __init__(
@@ -26,7 +27,9 @@ class Bargainer:
         '''
         Initializes a conversation in the database.
         '''
-        if (product := self.db["products"].find_one({'_id': product_id})) == None:
+        object_id = ObjectId(product_id)
+        if (product := self.db["products"].find_one(
+            {'_id': object_id}, {'_id': 0})) == None:
             # Handle bad product_id input
             return {
                 "success": False
@@ -40,12 +43,11 @@ class Bargainer:
             "closed": False,
             "user_features": None
         }
-
         result = self.db["conversations"].insert_one(conversation)
 
         return {
             "success": True,
-            "conversation_id": result.inserted_id,
+            "conversation_id": str(result.inserted_id),
             "message": product["opening"]
         }
     
@@ -67,7 +69,7 @@ class Bargainer:
     
     def select_next_topic(self, user_features, product_features):
         #TODO
-        return 'idk'
+        return 'square footage'
     
     def reply(self, conversation_id, message):
         '''
@@ -77,18 +79,19 @@ class Bargainer:
             2. Calculate updated offer
             3. Use user and product features to choose next topic
             4. Update messages (messages += [reply + price update + feature selection])
-            4. Construct conversation history (preamble + messages)
+            4. Construct conversation history (preamble + information + opening + messages)
             5. Generate response
             6. Update database entry
         '''
         if (conversation := self.db["conversations"].find_one(
-            {'_id': conversation_id})) == None:
+            {'_id': ObjectId(conversation_id)}, {'_id': 0})) == None:
             # Handle bad conversation_id
             return {
                 "success": False
             }
         product = self.db["products"].find_one(
-            {"_id": conversation["product_id"]}
+            {"_id": ObjectId(conversation["product_id"])},
+            {'_id': 0}
         )
         # Perform feature update
         if len(conversation["messages"]) == 0:
@@ -96,7 +99,7 @@ class Bargainer:
                 feature: 5 for feature in product["product_features"].keys()
             }
             updated_user_features = self.sentiment_analyzer.analyze(
-                conversation["preamble"][-1]["content"],
+                product["opening"],
                 message,
                 user_features
             )
@@ -124,15 +127,25 @@ class Bargainer:
         
         # Generate response and update database entry
         messages = (conversation["messages"] 
-                    + message 
-                    + textfile.price_update(latest_offer)
-                    + textfile.feature_selection(next_topic, product["name"]))
+                    + [{"role": "user", "content": message},]
+        )
         response = self.openai_client.chat.completions.create(
             model=self.model,
             temperature=self.temp,
-            messages=product["preamble"] + messages
+            messages=(
+                [
+                    {"role": "system", "content": textfile.preamble},
+                    {"role": "system", "content": product["information"]}
+                ] 
+                + messages
+                + [
+                    {"role": "system", "content": textfile.price_update(latest_offer, product["name"])},
+                    {"role": "system", "content": textfile.feature_selection(next_topic, product["name"])}
+                ]
+            )
         )
-        db_filter = {"_id": conversation_id}
+        messages += [{"role": "system", "content": response.choices[0].message.content}]
+        db_filter = {"_id": ObjectId(conversation_id)}
         db_newvalues = {"$set": {
             "messages": messages, 
             "latest_offer": latest_offer,
@@ -145,4 +158,14 @@ class Bargainer:
             "message": response.choices[0].message.content,
             "closed": False,
             "offer": latest_offer
+        }
+
+    def create_product(self, product):
+        if (result := self.db["products"].insert_one(product)) == None:
+            return {
+                "success": False
+            }
+        return {
+            "success": True,
+            "product_id": result.inserted_id
         }

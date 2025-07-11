@@ -1,0 +1,14 @@
+{
+    "name": "apartment",
+    "listing_price": 125000.00,
+    "min_price": 100000.00,
+    "product_features": {
+        "location": 6.0, 
+        "price": 7.0, 
+        "square footage": 5.0, 
+        "outdoor space": 5.0, 
+        "pet policies": 1.0
+    },
+    "information": "The item you are selling is an apartment in the Chicago Hyde Park area. The apartment is listed at $125000, and has 2 bedrooms and 1 bathroom. The square footage of the house is 1221 sqft. This apartment is located two blocks east of the lake and is two blocks west of groceries, restaurants, a theatre, and the train station. The apartment also features a beautiful shared yard where residents can relax amidst flowers and vegetable gardens. The Univesity of Chicago is located just a ten minute walk away, making this an ideal apartment for students or faculty.",
+    "opening": "Nice to meet you! I heard that you're in the market for a new apartment. In a short paragraph (~100 words), could you describe to me what matters to you most when looking for a new apartment?"
+}

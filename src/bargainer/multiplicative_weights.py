@@ -1,7 +1,6 @@
-'''
-Sentiment analyzer class for updating user features based on natural-language
-responses. Uses multiplicative weights update method.
-'''
+# Sentiment analyzer class for updating user features based on natural-language
+# responses. Uses multiplicative weights update method.
+
 
 weighting_prompt = ("Below is a snippet from a conversation "
 "between two individuals, P1 and P2. P1 will speak first, followed "
@@ -9,7 +8,7 @@ weighting_prompt = ("Below is a snippet from a conversation "
 "Your job is to analyze the following dialogue and rate how much "
 "P2 cares about a specific feature. Here is the dialogue:")
 
-def decision(feature):
+def weighting_response(feature):
     return ("Based on the snippet of dialogue above, how "
     f"would you rate how much P2 cares about {feature} as a "
     "buyer? Give your answer on a scale from 1 to 10, where "
@@ -47,7 +46,7 @@ class MultWeights:
                     {"role": "system", "content": weighting_prompt},
                     {"role": "user", "content": m1},
                     {"role": "user", "content": m2},
-                    {"role": "system", "content": decision(feature)}
+                    {"role": "system", "content": weighting_response(feature)}
                 ]
             )
             weight = (int(decision.choices[0].message.content)) / 5
