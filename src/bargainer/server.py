@@ -25,7 +25,8 @@ async def start_conversation(data: NewConversationPayload):
 @app.post("/conversations/{conversation_id}")
 async def continue_conversation(data: ReplyPayload, conversation_id: str):
     message = data.message
-    return bargainer.reply(conversation_id, message)
+    counteroffer = data.offer
+    return bargainer.reply(conversation_id, message, counteroffer)
 
 # Insert new product into database
 @app.post("/products")

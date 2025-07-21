@@ -6,6 +6,8 @@ class NewConversationPayload(BaseModel):
 
 class ReplyPayload(BaseModel):
     message: str
+    offer: float
+    accept: bool
 
 class ProductPayload(BaseModel):
     name: str

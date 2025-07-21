@@ -10,6 +10,20 @@ current_price_query = ("What is the latest offer, given as a dollar "
 "fifty cents, you should respond with 2.50. If no offer was made, "
 "you should respond with -1.")
 
+opening_prompt = ("Based on the above information, write an opening "
+"message to a potential buyer of your product.")
+
+def attribution_prompt_1(feature):
+    return ("You are about to be presented with a snippet from a "
+            "conversation. The first person to speak will be a seller "
+            "of a product, and the second person to speak will be a "
+            "potential buyer. Your job is to give a rating from 0 to 1 "
+            f"scoring how much the feature {feature} influenced the second "
+            "speaker's response.")
+
+attribution_prompt_2 = ("Now give your response. Please only respond with "
+                        "a single real number from 0 to 1.")
+
 def price_update(price, product):
     return ("In the next round of negotiation, you should offer the "
     f"buyer {price} dollars for the {product}.")
@@ -19,6 +33,12 @@ def feature_selection(feature, product):
     f"{feature} and how the {product} exemplifies it. You may assume "
     "that this feature is one that is important to the buyer and that "
     f"they will value its presence in the {product}.")
+
+def remaining_rounds(rounds):
+    return (f"Keep in mind that you only have {rounds} rounds of "
+            "bargaining remaining, where a round is defined as "
+            "both you and the user giving replies and possibly "
+            "making/accepting offers.")
 
 preamble = ("You are an agent who wants to sell an item "
 "to a buyer. You will bargain with the buyer to decide a "
@@ -39,8 +59,4 @@ preamble = ("You are an agent who wants to sell an item "
 "Your output should be of the following format: "
 "(latest offer: [offer], personal valuation: [price], "
 "strategy: [strategy]) [message]. In your message, state your current offering "
-"price. Limit the length of your message to 100 words. "
-"Your message to the buyer "
-"can be exactly one of the following options: (1) offer: "
-"[price], (2) accept, (3) reject: price too low, (4) counteroffer: "
-"[price], or (5) question: [question].")
+"price. Limit the length of your message to 100 words. ")

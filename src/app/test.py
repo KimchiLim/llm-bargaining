@@ -22,10 +22,20 @@ while True:
             conversation_id = response["conversation_id"]
             print(f"Conversation id is {conversation_id}")
     elif option == '2':
-        print("Please type your response:")
-        reply = input("> ")
+        print("You may respond with a counteroffer and message.")
+        print("Please enter your counteroffer as a dollar amount:")
+        counteroffer_str = input("> ")
+        try:
+            counteroffer = float(counteroffer_str)
+        except Exception as e:
+            print(f"[Error] {e}")
+            continue
+        print("Please enter your message:")
+        message = input("> ")
         payload = {
-            "message": reply
+            "offer": counteroffer,
+            "message": message,
+            "accept": False
         }
         response = requests.post(URL + f"/conversations/{conversation_id}", json=payload).json()
         if response["success"] == False:

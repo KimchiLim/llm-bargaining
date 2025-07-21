@@ -3,6 +3,7 @@ from pymongo import MongoClient
 from multiplicative_weights import MultWeights
 import textfile
 from bson.objectid import ObjectId
+import random
 
 class Bargainer:
     def __init__(
@@ -11,12 +12,14 @@ class Bargainer:
             db_url,
             model="gpt-4o-mini",
             temp=0.7,
-            sentiment_analyzer=None
+            sentiment_analyzer=None,
+            epsilon=0.2
             ):
         self.openai_client = OpenAI(api_key=openai_api_key)
         self.model = model
         self.temp = temp
         self.db = MongoClient(db_url)["bargaining_db"]
+        self.epsilon = epsilon
 
         if sentiment_analyzer == None:
             self.sentiment_analyzer = MultWeights(self.openai_client)
@@ -34,21 +37,37 @@ class Bargainer:
             return {
                 "success": False
             }
+        
+        response = self.openai_client.chat.completions.create(
+            model=self.model,
+            temperature=self.temp,
+            messages=[
+                {"role": "system", "content": textfile.preamble},
+                {"role": "system", "content": product["information"]},
+                {"role": "system", "content": textfile.opening_prompt}
+            ]
+        )
+        opening = response.choices[0].message.content
 
         conversation = {
             "product_id": product_id,
             "max_rounds": max_rounds,
-            "messages": [],
+            "round": 0,
+            "messages": [{"role": "system", "content": opening}],
             "latest_offer": product["listing_price"],
+            "latest_counteroffer": 0,
             "closed": False,
-            "user_features": None
+            "weights": {
+                feature: 1 for feature in product["product_features"].keys()
+            }
         }
         result = self.db["conversations"].insert_one(conversation)
 
         return {
             "success": True,
             "conversation_id": str(result.inserted_id),
-            "message": product["opening"]
+            "message": opening,
+            "offer": product["listing_price"]
         }
     
     def query_price(self, message):
@@ -67,14 +86,59 @@ class Bargainer:
         )
         return float(response.choices[0].message.content)
     
-    def select_next_topic(self, user_features, product_features):
-        #TODO
-        return 'square footage'
+    def update_weights(self,
+                       weights,
+                       counteroffer,
+                       prev_offer,
+                       prev_counteroffer,
+                       m1,
+                       m2):
+        '''
+        Performs a weight update with attribution
+        '''
+        gap = prev_offer - prev_counteroffer
+        penalty = 2 * (prev_offer - counteroffer) / gap - 1
+        attribution = dict()
+        for feature in weights.keys():
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                temperature=self.temp,
+                messages=[
+                    {"role": "system", "content": textfile.attribution_prompt_1(feature)},
+                    {"role": "user", "content": m1},
+                    {"role": "user", "content": m2},
+                    {"role": "system", "content": textfile.attribution_prompt_2}
+                ]
+            )
+            attribution[feature] = float(response.choices[0].message.content)
+        attr_sum = sum(attribution.values())
+        updated_weights = dict()
+        for feature in weights.keys():
+            if penalty >= 0:
+                updated_weights[feature] = weights[feature] * (1 - self.epsilon) ** (attribution[feature] * penalty / attr_sum)
+            else:
+                updated_weights[feature] = weights[feature] * (1 + self.epsilon) ** (-attribution[feature] * penalty / attr_sum)
+        print(f"In update_weights. Attributions: {[attribution]}, penalty: {penalty}")
+        return updated_weights
     
-    def reply(self, conversation_id, message):
+    def select_next_topic(self, weights):
+        kv = weights.items()
+        topics = [item[0] for item in kv]
+        weights = [item[1] for item in kv]
+        return random.choices(topics, weights=weights)
+
+    def update_price(self, weights, counteroffer, offer, min_price):
+        '''
+        Calculates a new selling price for the product given a recent history
+        and current attribute weights
+        '''
+        gap = offer - counteroffer
+        return max(min_price, counteroffer, offer - gap * (1/2))
+    
+    def reply(self, conversation_id, message, counteroffer):
         '''
         Things we need to do here:
-            0. Perform sentiment analysis of user reply and update user features (or set them, if first reply)
+            0. Perform analysis of user reply and update user features
             1. Query the model for the latest offer/price
             2. Calculate updated offer
             3. Use user and product features to choose next topic
@@ -89,41 +153,36 @@ class Bargainer:
             return {
                 "success": False
             }
+        if conversation["max_rounds"] == conversation["round"]:
+            return {
+                "success": False
+            }
+
         product = self.db["products"].find_one(
             {"_id": ObjectId(conversation["product_id"])},
             {'_id': 0}
         )
         # Perform feature update
-        if len(conversation["messages"]) == 0:
-            user_features = {
-                feature: 5 for feature in product["product_features"].keys()
-            }
-            updated_user_features = self.sentiment_analyzer.analyze(
-                product["opening"],
-                message,
-                user_features
-            )
+        if len(conversation["messages"]) == 1:
+            prev_counteroffer = counteroffer
         else:
-            updated_user_features = self.sentiment_analyzer.analyze(
-                conversation["messages"][-1]["content"],
-                message,
-                conversation["user_features"]
-            )
-
-        # Query model for latest offer
-        latest_offer = self.query_price(message)
-
-        # Calculate updated offer (change this later)
-        if latest_offer == -1:
-            latest_offer = conversation["latest_offer"]
-        else:
-            latest_offer = (latest_offer + conversation["latest_offer"]) / 2
-        
-        # Choose next topic
-        next_topic = self.select_next_topic(
-            updated_user_features,
-            product["product_features"]
+            prev_counteroffer = conversation["latest_counteroffer"]
+        updated_weights = self.update_weights(
+            conversation["weights"],
+            counteroffer,
+            conversation["latest_offer"],
+            prev_counteroffer,
+            conversation["messages"][-1]["content"],
+            message
         )
+        print("Updated weights: ", updated_weights)
+        
+        new_price = self.update_price(updated_weights, counteroffer, conversation["latest_offer"], product["min_price"])
+        # TODO: If new_price == counteroffer, then accept counteroffer
+
+        # Choose next topic
+        next_topic = self.select_next_topic(updated_weights)
+        print("Selected topic: ", next_topic)
         
         # Generate response and update database entry
         messages = (conversation["messages"] 
@@ -139,17 +198,20 @@ class Bargainer:
                 ] 
                 + messages
                 + [
-                    {"role": "system", "content": textfile.price_update(latest_offer, product["name"])},
-                    {"role": "system", "content": textfile.feature_selection(next_topic, product["name"])}
+                    {"role": "system", "content": textfile.price_update(new_price, product["name"])},
+                    {"role": "system", "content": textfile.feature_selection(next_topic, product["name"])},
+                    {"role": "system", "content": textfile.remaining_rounds(conversation["max_rounds"] - conversation["round"])}
                 ]
             )
         )
         messages += [{"role": "system", "content": response.choices[0].message.content}]
         db_filter = {"_id": ObjectId(conversation_id)}
         db_newvalues = {"$set": {
+            "round": conversation["round"] + 1,
             "messages": messages, 
-            "latest_offer": latest_offer,
-            "user_features": updated_user_features
+            "latest_offer": new_price,
+            "latest_counteroffer": counteroffer,
+            "weights": updated_weights
             }}
         self.db["conversations"].update_one(db_filter, db_newvalues)
 
@@ -157,7 +219,7 @@ class Bargainer:
             "success": True,
             "message": response.choices[0].message.content,
             "closed": False,
-            "offer": latest_offer
+            "offer": new_price
         }
 
     def create_product(self, product):
